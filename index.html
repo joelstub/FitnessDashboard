@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<!-- ============================================================
+     TRACKER 2.0 – Kalorien, Eiweiß & Training
+     Eine einzige Datei: HTML + CSS + JavaScript, keine Abhängigkeiten.
+     Daten liegen ausschließlich im localStorage dieses Geräts.
+
+     Aufbau:
+       CSS   1 Tokens · 2 Basis · 3 Layout · 4 Typo · 5 Hero-Ringe
+             6 Einheiten · 7 Listen · 8 Buttons · 9 Charts · 10 Formulare
+             11 Sheets · 12 Dialog/Toast · 13 Bewegung
+       JS    A Konstanten · B Helfer · C Daten · D Training-Logik
+             E UI-Bausteine · F Heute · G Woche · H Fortschritt
+             I Verlauf/Tag · J Einträge · K Einstellungen/Backup
+             L Navigation/Events · M Tageswechsel · N Icon · O Start
+     ============================================================ -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tracker">
+<meta name="theme-color" content="#000000">
+<meta name="format-detection" content="telephone=no">
+<title>Tracker</title>
+
+<style>
+/* ============================================================
+   1. TOKENS
+   Jede Kennzahl hat ihre eigene Farbe – überall gleich:
+   Training = Violett→Magenta, Kalorien = Amber→Koralle, Eiweiß = Cyan→Blau
+   ============================================================ */
+:root{
+  --bg:#000;
+  --surface:rgba(255,255,255,.065);
+  --surface-2:rgba(255,255,255,.11);
+  --line:rgba(255,255,255,.09);
+  --text:#f5f5f7;
+  --muted:rgba(235,235,245,.6);
+  --dim:rgba(235,235,245,.32);
+
+  --train-a:#b86bff; --train-b:#ff3b8d; --train:#e24bd0;
+  --kcal-a:#ffb340; --kcal-b:#ff5e3a; --kcal:#ff8a3d;
+  --prot-a:#5ee6ff; --prot-b:#2f7bff; --prot:#4fb0ff;
+
+  --ok:#34d27b; --warn:#ffd60a; --bad:#ff453a;
+
+  --round:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,"Helvetica Neue",Arial,sans-serif;
+
+  --sat:env(safe-area-inset-top,0px);
+  --sab:env(safe-area-inset-bottom,0px);
+  --tabh:58px;
+  --kb:0px;               /* Tastaturhöhe, per JS gesetzt */
+  color-scheme:dark;
+}
+
+/* ============================================================
+   2. BASIS / iOS
+   ============================================================ */
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);
+  -webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+/* Fixierter Body: kein Gummiband-Effekt an der Gesamtseite */
+body{position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;touch-action:manipulation;
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+input{user-select:text;-webkit-user-select:text}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:inherit}
+button:focus-visible,input:focus-visible{outline:2px solid var(--prot);outline-offset:2px}
+.hidden{display:none!important}
+
+/* ============================================================
+   3. LAYOUT
+   ============================================================ */
+.view{position:absolute;left:0;right:0;top:0;bottom:calc(var(--tabh) + var(--sab));
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;
+  padding:calc(var(--sat) + 12px) 18px 32px;display:none}
+.view.active{display:block;animation:viewIn .28s ease}
+@keyframes viewIn{from{opacity:0}to{opacity:1}}
+
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;
+  height:calc(var(--tabh) + var(--sab));padding-bottom:var(--sab);
+  background:rgba(10,10,12,.82);backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);
+  border-top:.5px solid var(--line)}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:44px;
+  font-size:10px;font-weight:600;color:var(--dim);text-align:center;transition:color .2s}
+.tab svg{width:25px;height:25px}
+.tab.active{color:var(--text)}
+
+/* ============================================================
+   4. TYPOGRAFIE
+   Zahlen & Überschriften in SF Pro Rounded – sportlich, weich, gut lesbar
+   ============================================================ */
+.date-line{font-size:15px;color:var(--muted);font-weight:500}
+.h-large{font-family:var(--round);font-size:36px;font-weight:800;letter-spacing:-.4px;line-height:1.1}
+.h-sec{font-family:var(--round);font-size:22px;font-weight:700;margin:30px 2px 12px;display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.h-sec small{font-family:var(--sans);font-size:14px;font-weight:500;color:var(--muted)}
+.num{font-family:var(--round);font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:var(--muted);line-height:1.45;margin:10px 2px 0}
+.group{background:var(--surface);border-radius:20px;overflow:hidden}
+.pad{padding:16px}
+
+/* ============================================================
+   5. HERO-RINGE (das Herzstück)
+   ============================================================ */
+.hero{position:relative;width:min(78vw,300px);margin:18px auto 0}
+.hero svg{width:100%;height:auto;display:block;overflow:visible}
+.hero .rings-g{transform:rotate(-90deg);transform-origin:150px 150px}
+.ring-track{fill:none;stroke-width:26}
+.ring-prog{fill:none;stroke-width:26;stroke-linecap:round;
+  transition:stroke-dashoffset 1.2s cubic-bezier(.2,.9,.25,1),opacity .3s}
+.hero-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.hero-big{font-family:var(--round);font-size:44px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.hero-small{font-size:13px;color:var(--muted);margin-top:4px;font-weight:500}
+.hero.pulse svg{animation:pulse .7s cubic-bezier(.2,.9,.25,1)}
+@keyframes pulse{0%{transform:scale(1)}40%{transform:scale(1.045)}100%{transform:scale(1)}}
+/* Funken beim Schließen des Trainingsrings */
+.spark{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;
+  background:var(--c);pointer-events:none;animation:spark .9s cubic-bezier(.15,.8,.3,1) forwards}
+@keyframes spark{
+  0%{transform:rotate(var(--a)) translateY(calc(var(--r) * -1)) scale(1);opacity:1}
+  100%{transform:rotate(var(--a)) translateY(calc((var(--r) + 46px) * -1)) scale(.2);opacity:0}}
+
+/* Legende unter den Ringen */
+.legend3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:22px}
+.leg{padding:0 2px}
+.leg-bar{width:22px;height:5px;border-radius:3px;margin-bottom:8px}
+.leg-val{font-family:var(--round);font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;white-space:nowrap}
+.leg-goal{font-size:13px;color:var(--muted);margin-top:2px;white-space:nowrap}
+.leg-state{font-size:13px;font-weight:600;margin-top:4px;white-space:nowrap}
+
+/* ============================================================
+   6. TRAININGSEINHEITEN
+   ============================================================ */
+.units{display:flex;flex-direction:column;gap:8px}
+.unit{display:flex;align-items:center;gap:14px;width:100%;min-height:62px;padding:10px 16px 10px 12px;
+  background:var(--surface);border-radius:18px;position:relative;overflow:hidden;
+  transition:background .3s,transform .12s}
+.unit:active{transform:scale(.985)}
+.unit::before{content:"";position:absolute;inset:0;opacity:0;transition:opacity .4s;
+  background:linear-gradient(100deg,rgba(184,107,255,.22),rgba(255,59,141,.10) 60%,transparent)}
+.unit.done::before{opacity:1}
+.check{position:relative;flex:none;width:40px;height:40px;border-radius:50%;
+  border:2.5px solid var(--dim);display:flex;align-items:center;justify-content:center;transition:border-color .25s}
+.check::after{content:"";position:absolute;inset:-2.5px;border-radius:50%;opacity:0;transform:scale(.4);
+  background:linear-gradient(135deg,var(--train-a),var(--train-b));transition:opacity .25s,transform .35s cubic-bezier(.3,1.6,.5,1)}
+.check svg{position:relative;z-index:1;width:22px;height:22px;stroke:#fff;stroke-width:3.2;fill:none;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:24;stroke-dashoffset:24;transition:stroke-dashoffset .3s .1s ease}
+.unit.done .check{border-color:transparent}
+.unit.done .check::after{opacity:1;transform:scale(1)}
+.unit.done .check svg{stroke-dashoffset:0}
+.unit-name{position:relative;flex:1;min-width:0;font-size:17px;font-weight:600;line-height:1.3}
+.unit.done .unit-name{color:var(--text)}
+.unit-tag{position:relative;flex:none;font-size:12px;font-weight:600;color:var(--muted);
+  border:1px solid var(--line);border-radius:10px;padding:3px 8px}
+.rest-card{background:var(--surface);border-radius:18px;padding:16px;font-size:15px;color:var(--muted);line-height:1.45}
+.rest-card b{display:block;font-family:var(--round);font-size:19px;color:var(--text);margin-bottom:2px}
+
+/* ============================================================
+   7. LISTEN
+   ============================================================ */
+.row{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;padding:10px 16px;position:relative}
+.row+.row::before{content:"";position:absolute;top:0;left:16px;right:0;height:.5px;background:var(--line)}
+button.row:active{background:var(--surface-2)}
+.row-time{width:44px;flex:none;color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.row-main{flex:1;min-width:0;display:block}
+.row-title{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row-sub{display:block;font-size:13px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.row-right{flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.r-kcal{display:block;font-family:var(--round);font-size:17px;font-weight:700;color:var(--kcal)}
+.r-prot{display:block;font-family:var(--round);font-size:14px;font-weight:600;color:var(--prot)}
+.chev{color:var(--dim);font-size:22px;flex:none}
+.mini{flex:none;display:block}
+.pill{flex:none;font-family:var(--round);font-size:14px;font-weight:700;padding:4px 10px;border-radius:12px;
+  background:var(--surface-2);color:var(--muted);font-variant-numeric:tabular-nums}
+.pill.full{background:linear-gradient(135deg,var(--train-a),var(--train-b));color:#fff}
+.empty{color:var(--muted);text-align:center;padding:26px 18px;font-size:15px;line-height:1.45}
+
+/* ============================================================
+   8. BUTTONS
+   ============================================================ */
+.btn-add{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:58px;margin-top:22px;
+  border-radius:18px;font-family:var(--round);font-size:18px;font-weight:700;color:#1a0f00;
+  background:linear-gradient(135deg,var(--kcal-a),var(--kcal-b));box-shadow:0 8px 28px -10px rgba(255,94,58,.7);
+  transition:transform .12s,opacity .12s}
+.btn-add:active{transform:scale(.98);opacity:.9}
+.btn-add span{font-size:26px;line-height:1;margin-top:-2px}
+.btn{display:block;width:100%;min-height:50px;border-radius:14px;margin-top:10px;background:var(--surface-2);
+  font-size:17px;font-weight:600;text-align:center;transition:opacity .12s}
+.btn:active{opacity:.6}
+.btn.accent{color:var(--prot)}
+.btn.danger{color:var(--bad)}
+.btn-primary{display:block;width:100%;min-height:54px;margin-top:18px;border-radius:16px;text-align:center;
+  font-family:var(--round);font-size:18px;font-weight:700;color:#1a0f00;
+  background:linear-gradient(135deg,var(--kcal-a),var(--kcal-b))}
+.btn-primary:active{opacity:.85}
+.link{color:var(--prot);font-size:17px;min-height:44px;min-width:44px;padding:0 4px}
+.link.bold{font-weight:600}
+.link:active{opacity:.5}
+.chips{display:flex;gap:8px;overflow-x:auto;margin:12px -18px 0;padding:2px 18px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:56px;min-width:44px;padding:9px 15px;border-radius:16px;background:var(--surface);
+  display:flex;flex-direction:column;justify-content:center;gap:2px;transition:transform .12s}
+.chip:active{transform:scale(.95);background:var(--surface-2)}
+.chip-name{font-size:15px;font-weight:600;white-space:nowrap}
+.chip-meta{font-size:13px;white-space:nowrap;font-family:var(--round);font-weight:600}
+.chip-meta .k{color:var(--kcal)} .chip-meta .p{color:var(--prot);margin-left:8px}
+.banner{display:block;width:100%;margin-top:14px;padding:12px 16px;min-height:44px;border-radius:14px;
+  background:rgba(255,214,10,.1);color:var(--warn);font-size:14px;font-weight:600}
+.seg{display:flex;background:var(--surface);border-radius:12px;padding:3px;margin-top:16px}
+.seg button{flex:1;min-height:38px;border-radius:9px;font-size:14px;font-weight:600;color:var(--muted);text-align:center;transition:background .2s,color .2s}
+.seg button.on{background:var(--surface-2);color:var(--text)}
+.icon-btn{color:var(--bad);font-size:15px;font-weight:600;min-height:44px;min-width:44px;padding:0 6px}
+
+/* ============================================================
+   9. WOCHE / FORTSCHRITT / CHARTS
+   ============================================================ */
+.week-strip{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:22px}
+.wday{display:flex;flex-direction:column;align-items:center;gap:6px;min-height:44px;padding:6px 0;border-radius:12px}
+.wday:active{background:var(--surface)}
+.wday span{font-size:12px;font-weight:600;color:var(--muted)}
+.wday.today span{color:var(--text)}
+.wday.future{opacity:.35}
+.chart svg{width:100%;height:auto;display:block;overflow:visible}
+.chart text{fill:var(--muted);font-size:10px;font-family:var(--sans)}
+.chart .v{fill:var(--text);font-size:9.5px;font-weight:600;font-family:var(--round)}
+.chart .goal{fill:var(--text);opacity:.65;font-size:9.5px}
+.chart .today{fill:var(--text);font-weight:700}
+.chart .line{fill:none;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.bar{transform-box:fill-box;transform-origin:50% 100%;animation:grow .7s cubic-bezier(.2,.9,.25,1) both}
+@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.chart-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.chart-title{font-family:var(--round);font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.chart-sub{font-size:13px;color:var(--muted)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+.stat{background:var(--surface);border-radius:18px;padding:14px 12px}
+.stat-val{font-family:var(--round);font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05}
+.stat-lbl{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.3}
+.quota{display:flex;align-items:center;gap:12px;padding:12px 0}
+.quota+.quota{border-top:.5px solid var(--line)}
+.quota-lbl{flex:1;font-size:15px;font-weight:500}
+.quota-lbl small{display:block;font-size:12px;color:var(--muted);margin-top:2px;font-weight:400}
+.quota-bar{width:86px;height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden;flex:none}
+.quota-bar i{display:block;height:100%;border-radius:4px}
+.quota-val{width:50px;text-align:right;font-family:var(--round);font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;flex:none}
+.heat-wrap{display:flex;gap:6px}
+.heat{flex:1;display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,1fr);gap:4px}
+.heat button{aspect-ratio:1;min-width:0;border-radius:5px;background:var(--surface-2)}
+.heat button.fut{background:transparent}
+.heat-days{display:grid;grid-template-rows:repeat(7,1fr);gap:4px;font-size:9px;color:var(--muted)}
+.heat-days span{display:flex;align-items:center}
+.heat-legend{display:flex;align-items:center;justify-content:flex-end;gap:4px;margin-top:10px;font-size:11px;color:var(--muted)}
+.heat-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+/* ============================================================
+   10. FORMULARE
+   ============================================================ */
+.field{margin-top:12px}
+.field label{display:block;font-size:13px;color:var(--muted);margin:0 4px 6px;font-weight:500}
+.input{display:block;width:100%;min-height:50px;padding:0 14px;border-radius:14px;
+  background:var(--surface-2);color:var(--text);border:1.5px solid transparent;outline:none;
+  font-size:17px;font-family:inherit;-webkit-appearance:none;appearance:none}
+.input::placeholder{color:var(--dim)}
+.input:focus{border-color:var(--prot)}
+.input.err{border-color:var(--bad)}
+.input-big{min-height:64px;font-family:var(--round);font-size:30px;font-weight:700;font-variant-numeric:tabular-nums}
+#f-kcal.input-big{color:var(--kcal)} #f-prot.input-big{color:var(--prot)}
+input[type="date"].input,input[type="time"].input{line-height:50px}
+.err-msg{color:var(--bad);font-size:13px;margin:6px 4px 0}
+.err-msg:empty{display:none}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid2 .field{margin-top:0}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;min-height:52px;margin-top:12px;
+  padding:0 14px;border-radius:14px;background:var(--surface-2);font-size:17px}
+.switch{position:relative;width:51px;height:31px;flex:none}
+.switch input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0}
+.switch span{position:absolute;inset:0;border-radius:16px;background:rgba(255,255,255,.16);transition:background .25s}
+.switch span::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 4px rgba(0,0,0,.3);transition:transform .25s}
+.switch input:checked+span{background:var(--ok)}
+.switch input:checked+span::after{transform:translateX(20px)}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+.shake{animation:shake .35s}
+
+/* ============================================================
+   11. BOTTOM SHEETS
+   ============================================================ */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .3s}
+.backdrop.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:var(--kb);background:#1a1a1d;border-radius:22px 22px 0 0;
+  padding:8px 18px calc(18px + var(--sab));max-height:calc(100% - var(--sat) - var(--kb) - 10px);
+  overflow-y:auto;overscroll-behavior:contain;transform:translateY(110%);visibility:hidden;
+  transition:transform .4s cubic-bezier(.32,.72,0,1),bottom .25s ease,visibility 0s linear .4s}
+.sheet.open{transform:none;visibility:visible;transition:transform .4s cubic-bezier(.32,.72,0,1),bottom .25s ease,visibility 0s}
+.sheet.tall{height:calc(100% - var(--sat) - 10px);background:#0d0d0f}
+#bd-day{z-index:40} #daySheet{z-index:41}
+#bd-entry{z-index:50} #entrySheet{z-index:51}
+.grabber{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,.2);margin:0 auto 6px}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px}
+.sheet-title{flex:1;text-align:center;font-size:17px;font-weight:600}
+.spacer{min-width:44px}
+.day-top{display:flex;align-items:center;gap:18px;margin-top:10px}
+.day-top .legend3{flex:1;grid-template-columns:1fr;gap:8px;margin:0}
+.day-top .leg{display:flex;align-items:baseline;gap:8px}
+.day-top .leg-bar{display:none}
+.day-top .leg-val{font-size:20px}
+
+/* ============================================================
+   12. DIALOG & TOAST
+   ============================================================ */
+#dialog{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .2s}
+#dialog.open{opacity:1;pointer-events:auto}
+.dlg{width:100%;max-width:290px;background:rgba(40,40,44,.98);border-radius:16px;overflow:hidden;text-align:center;transform:scale(1.08);transition:transform .2s}
+#dialog.open .dlg{transform:none}
+.dlg-body{padding:20px 16px 16px}
+.dlg-title{font-size:17px;font-weight:600}
+.dlg-msg{font-size:13px;color:rgba(235,235,245,.75);margin-top:6px;line-height:1.4}
+.dlg-btns{display:flex;border-top:.5px solid var(--line)}
+.dlg-btns button{flex:1;min-height:46px;font-size:17px;color:var(--prot);text-align:center}
+.dlg-btns button+button{border-left:.5px solid var(--line)}
+.dlg-btns .strong{font-weight:600}
+.dlg-btns .destructive{color:var(--bad);font-weight:600}
+#toast{position:fixed;left:16px;right:16px;z-index:90;bottom:calc(var(--tabh) + var(--sab) + 12px);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:6px 8px 6px 16px;
+  border-radius:16px;background:rgba(48,48,52,.97);font-size:15px;font-weight:500;
+  transform:translateY(20px);opacity:0;pointer-events:none;transition:transform .25s,opacity .25s}
+#toast.show{transform:none;opacity:1;pointer-events:auto}
+#toast button{flex:none;min-height:44px;padding:0 10px;color:var(--warn);font-weight:600}
+#importFile{position:absolute;left:-100px;width:1px;height:1px;opacity:0}
+
+/* ============================================================
+   13. BEWEGUNG REDUZIEREN (Systemeinstellung respektieren)
+   ============================================================ */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+
+<body>
+
+<!-- Gemeinsame Farbverläufe & Glow-Filter für alle Ringe und Balken -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="g-train" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b86bff"/><stop offset="1" stop-color="#ff3b8d"/></linearGradient>
+    <linearGradient id="g-kcal"  x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffb340"/><stop offset="1" stop-color="#ff5e3a"/></linearGradient>
+    <linearGradient id="g-prot"  x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5ee6ff"/><stop offset="1" stop-color="#2f7bff"/></linearGradient>
+    <linearGradient id="g-bad"   x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6b5e"/><stop offset="1" stop-color="#d7193a"/></linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+</svg>
+
+<!-- ============================================================
+     ANSICHT: HEUTE
+     ============================================================ -->
+<section class="view active" id="view-today">
+  <div class="date-line" id="t-date"></div>
+  <h1 class="h-large" id="t-weekday"></h1>
+  <div id="t-banner"></div>
+
+  <!-- Drei Ringe: außen Training, Mitte Kalorien, innen Eiweiß -->
+  <div class="hero" id="hero">
+    <svg viewBox="0 0 300 300" aria-hidden="true">
+      <g class="rings-g">
+        <circle class="ring-track" cx="150" cy="150" r="135" stroke="url(#g-train)" stroke-opacity=".2"/>
+        <circle class="ring-track" cx="150" cy="150" r="105" stroke="url(#g-kcal)"  stroke-opacity=".2"/>
+        <circle class="ring-track" cx="150" cy="150" r="75"  stroke="url(#g-prot)"  stroke-opacity=".2"/>
+        <circle class="ring-prog" id="hr-train" cx="150" cy="150" r="135" stroke="url(#g-train)"/>
+        <circle class="ring-prog" id="hr-kcal"  cx="150" cy="150" r="105" stroke="url(#g-kcal)"/>
+        <circle class="ring-prog" id="hr-prot"  cx="150" cy="150" r="75"  stroke="url(#g-prot)"/>
+      </g>
+    </svg>
+    <div class="hero-center"><div class="hero-big" id="hero-big"></div><div class="hero-small" id="hero-small"></div></div>
+  </div>
+  <div class="legend3" id="t-legend"></div>
+
+  <h2 class="h-sec">Training <small id="t-train-count"></small></h2>
+  <div id="t-units"></div>
+
+  <button class="btn-add" data-action="add-entry"><span>+</span> Essen hinzufügen</button>
+  <div id="t-favs"></div>
+
+  <h2 class="h-sec">Gegessen <small id="t-entry-count"></small></h2>
+  <div id="t-entries"></div>
+</section>
+
+<section class="view" id="view-week"></section>
+<section class="view" id="view-progress"></section>
+<section class="view" id="view-history"></section>
+<section class="view" id="view-settings"></section>
+
+<!-- ============================================================
+     TAB-LEISTE
+     ============================================================ -->
+<nav class="tabbar" role="tablist">
+  <button class="tab active" data-action="tab" data-tab="today" role="tab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2.5"/></svg>Heute</button>
+  <button class="tab" data-action="tab" data-tab="week" role="tab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20V12M10 20V6M15 20v-9M20 20V9"/></svg>Woche</button>
+  <button class="tab" data-action="tab" data-tab="progress" role="tab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>Fortschritt</button>
+  <button class="tab" data-action="tab" data-tab="history" role="tab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Verlauf</button>
+  <button class="tab" data-action="tab" data-tab="settings" role="tab">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Einstellungen</button>
+</nav>
+
+<!-- SHEET: TAG-DETAILS -->
+<div class="backdrop" id="bd-day" data-action="close-day"></div>
+<div class="sheet tall" id="daySheet" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-head"><span class="spacer"></span><div class="sheet-title" id="ds-title"></div><button class="link bold" data-action="close-day">Fertig</button></div>
+  <div id="ds-body"></div>
+</div>
+
+<!-- SHEET: EINTRAG -->
+<div class="backdrop" id="bd-entry" data-action="close-entry"></div>
+<div class="sheet" id="entrySheet" role="dialog" aria-modal="true">
+  <div class="grabber"></div>
+  <div class="sheet-head">
+    <button type="button" class="link" data-action="close-entry">Abbrechen</button>
+    <div class="sheet-title" id="es-title">Essen hinzufügen</div>
+    <button type="button" class="link bold" data-action="save-entry">Sichern</button>
+  </div>
+  <form id="entryForm" novalidate autocomplete="off">
+    <div class="grid2" style="margin-top:8px">
+      <div class="field">
+        <label for="f-kcal">Kalorien</label>
+        <input class="input input-big" id="f-kcal" type="text" inputmode="decimal" enterkeyhint="next" placeholder="0">
+        <div class="err-msg" id="e-kcal"></div>
+      </div>
+      <div class="field">
+        <label for="f-prot">Eiweiß in g</label>
+        <input class="input input-big" id="f-prot" type="text" inputmode="decimal" enterkeyhint="next" placeholder="0">
+        <div class="err-msg" id="e-prot"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-name">Name (optional)</label>
+      <input class="input" id="f-name" type="text" maxlength="60" placeholder="z. B. Mittagessen" enterkeyhint="done" autocapitalize="sentences">
+    </div>
+    <div class="field" id="time-field">
+      <label for="f-time">Uhrzeit</label>
+      <input class="input" id="f-time" type="time">
+    </div>
+    <label class="toggle-row"><span>Als Favorit speichern</span><span class="switch"><input type="checkbox" id="f-fav"><span></span></span></label>
+    <button type="submit" class="btn-primary">Speichern</button>
+    <button type="button" class="btn danger" id="es-delete" data-action="delete-entry">Eintrag löschen</button>
+  </form>
+</div>
+
+<!-- DIALOG -->
+<div id="dialog" role="alertdialog" aria-modal="true">
+  <div class="dlg">
+    <div class="dlg-body"><div class="dlg-title" id="dlg-title"></div><div class="dlg-msg" id="dlg-msg"></div></div>
+    <div class="dlg-btns"><button id="dlg-cancel">Abbrechen</button><button id="dlg-ok">OK</button></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" role="status" aria-live="polite"><span id="toast-msg"></span><button id="toast-btn" class="hidden"></button></div>
+<input type="file" id="importFile">
+
+<script>
+'use strict';
+
+/* ============================================================
+   A. KONSTANTEN
+   ============================================================ */
+const STORAGE_KEY = 'tracker.v1';          // gleicher Schlüssel wie Version 1 → alte Daten bleiben erhalten
+const LAST_EXPORT_KEY = 'tracker.lastExport';
+const DATA_VERSION = 2;
+
+const WD = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+const WD_SHORT = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+const WD_LETTER = ['M','D','M','D','F','S','S'];
+
+/* Trainingsplan: Einheiten mit „+“ trennen.
+   Beginnt ein Tag mit „Ruhetag“, ist alles danach optional (zählt nicht für den Ring). */
+const DEFAULT_PLAN = [
+  'Ruhetag, optional Spaziergang oder Mobilität',
+  'Push A + 5 km locker Zone 2',
+  'Schwellenlauf',
+  'Pull A + 5 km locker Zone 2 + Abs',
+  'Intervalle',
+  'Kurze Sprints + Plyometrie + Push B',
+  'Longrun Zone 2 + Pull B + Abs'
+];
+
+/* Ringradien im 300er-Koordinatensystem */
+const R = { train:135, kcal:105, prot:75 };
+const C = r => 2 * Math.PI * r;
+
+/* Farbschwellen Kalorien (Anteil am Ziel):
+   < 80 % läuft · 80–95 % fast · 95–105 % im Ziel · 105–110 % leicht drüber · > 110 % deutlich drüber */
+const KCAL_T = { almost:0.80, inLow:0.95, inHigh:1.05, over:1.10 };
+const PROT_ALMOST = 0.80;
+const MAX_KCAL = 10000, MAX_PROT = 1000;
+
+/* ============================================================
+   B. HELFER
+   ============================================================ */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const pad = n => String(n).padStart(2, '0');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* Datum IMMER in lokaler Zeit; 12:00 als Uhrzeit verhindert Sommerzeit-Sprünge */
+function keyOf(d){ return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+function todayKey(){ return keyOf(new Date()); }
+function dateFromKey(k){ const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d, 12); }
+function addDays(k, n){ const d = dateFromKey(k); d.setDate(d.getDate() + n); return keyOf(d); }
+function dayDiff(a, b){ return Math.round((dateFromKey(b) - dateFromKey(a)) / 864e5); }
+function planIndex(k){ return (dateFromKey(k).getDay() + 6) % 7; } // 0 = Montag
+function nowTime(){ const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+function fmtDateShort(k){ return dateFromKey(k).toLocaleDateString('de-DE', { weekday:'short', day:'numeric', month:'short', year:'numeric' }); }
+const fmtDM = k => { const d = dateFromKey(k); return d.getDate() + '.' + (d.getMonth() + 1) + '.'; };
+
+const fmtK = n => Math.round(n).toLocaleString('de-DE');
+const fmtP = n => (Math.round(n * 10) / 10).toLocaleString('de-DE', { maximumFractionDigits:1 });
+const numToInput = n => String(n).replace('.', ',');
+
+/* Zahleneingabe: Komma oder Punkt, keine Buchstaben, nicht negativ */
+function parseNum(raw, max){
+  const s = String(raw ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (s === '') return { error:'Bitte eine Zahl eingeben' };
+  if (s.startsWith('-')) return { error:'Keine negativen Werte' };
+  if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) return { error:'Nur Zahlen, z. B. 450 oder 12,5' };
+  const v = parseFloat(s);
+  if (!isFinite(v)) return { error:'Ungültige Zahl' };
+  if (v > max) return { error:'Wert unrealistisch hoch' };
+  return { value:Math.round(v * 10) / 10 };
+}
+
+/* ============================================================
+   C. DATEN
+   {
+     version:2,
+     goals:{ kcal, protein },
+     plan:[7 Texte, Montag zuerst],
+     favorites:[{ id, name, kcal, protein }],
+     days:{ "JJJJ-MM-TT": {
+        entries:[{ id, time, name, kcal, protein }],
+        units?:[{ n:"Push A", d:true, o:false }]   ← Momentaufnahme des Plans, sobald etwas abgehakt wurde
+     } }
+   }
+   ============================================================ */
+function defaultState(){
+  return { version:DATA_VERSION, goals:{ kcal:2200, protein:170 }, plan:DEFAULT_PLAN.slice(),
+           favorites:[{ id:uid(), name:'Proteinshake', kcal:250, protein:40 }], days:{} };
+}
+
+/* Bereinigt Daten aus localStorage oder Import – auch alte Version 1 */
+function normalize(o){
+  if (!o || typeof o !== 'object') throw new Error('invalid');
+  const s = defaultState();
+  s.favorites = [];
+  if (o.goals){
+    const k = +o.goals.kcal, p = +o.goals.protein;
+    if (k > 0 && k <= MAX_KCAL) s.goals.kcal = k;
+    if (p > 0 && p <= MAX_PROT) s.goals.protein = p;
+  }
+  if (Array.isArray(o.plan) && o.plan.length === 7) s.plan = o.plan.map(x => String(x ?? '').slice(0, 160));
+  if (Array.isArray(o.favorites)){
+    s.favorites = o.favorites
+      .filter(f => f && isFinite(+f.kcal) && +f.kcal >= 0 && isFinite(+f.protein) && +f.protein >= 0)
+      .map(f => ({ id:String(f.id || uid()), name:String(f.name || 'Favorit').slice(0, 60), kcal:+f.kcal, protein:+f.protein }));
+  }
+  if (o.days && typeof o.days === 'object'){
+    for (const [k, d] of Object.entries(o.days)){
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !d || typeof d !== 'object') continue;
+      const entries = Array.isArray(d.entries) ? d.entries
+        .filter(e => e && isFinite(+e.kcal) && +e.kcal >= 0 && isFinite(+e.protein) && +e.protein >= 0)
+        .map(e => ({ id:String(e.id || uid()), time:/^\d{2}:\d{2}$/.test(e.time) ? e.time : '12:00',
+                     name:String(e.name || '').slice(0, 60), kcal:+e.kcal, protein:+e.protein })) : [];
+      entries.sort((a, b) => a.time.localeCompare(b.time));
+      let units = null;
+      if (Array.isArray(d.units)){
+        units = d.units.filter(u => u && u.n).slice(0, 12).map(u => ({ n:String(u.n).slice(0, 60), d:!!u.d, o:!!u.o }));
+      } else if (d.trainingDone){
+        /* Migration Version 1: „Training erledigt“ → alle Einheiten erledigt */
+        units = parseUnits(d.trainingLabel || s.plan[planIndex(k)]).map(u => ({ ...u, d:true }));
+      }
+      const day = { entries };
+      if (units && units.length) day.units = units;
+      if (entries.length || (units && units.some(u => u.d))) s.days[k] = day;
+    }
+  }
+  return s;
+}
+
+function load(){
+  let raw = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? normalize(JSON.parse(raw)) : defaultState();
+  } catch (e) {
+    /* Beschädigte Daten nicht stillschweigend überschreiben: Kopie sichern */
+    try { if (raw) localStorage.setItem(STORAGE_KEY + '.corrupt-' + Date.now(), raw); } catch (_) {}
+    return defaultState();
+  }
+}
+function save(){
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  catch (e) { toast('Speichern fehlgeschlagen. Ist der Speicher voll?'); }
+}
+
+/* --- Tage --- */
+function getDay(k){ return state.days[k] || { entries:[] }; }
+function ensureDay(k){ if (!state.days[k]) state.days[k] = { entries:[] }; return state.days[k]; }
+function cleanupDay(k){
+  const d = state.days[k];
+  if (d && !d.entries.length && !(d.units && d.units.some(u => u.d))) delete state.days[k];
+}
+function hasEntries(k){ return getDay(k).entries.length > 0; }
+function totals(k){
+  let kcal = 0, protein = 0;
+  for (const e of getDay(k).entries){ kcal += e.kcal; protein += e.protein; }
+  return { kcal, protein };
+}
+function firstDataKey(){ const ks = Object.keys(state.days).sort(); return ks.length ? ks[0] : todayKey(); }
+
+/* ============================================================
+   D. TRAINING-LOGIK
+   ============================================================ */
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+/* „Push A + 5 km locker Zone 2“ → [{n:"Push A"}, {n:"5 km locker Zone 2"}]
+   „Ruhetag, optional Spaziergang …“ → nur optionale Einheiten
+   „optional Abs“ → einzelne optionale Einheit */
+function parseUnits(text){
+  const t = String(text || '').trim();
+  if (/^ruhetag/i.test(t)){
+    const rest = t.replace(/^ruhetag\s*[,:;–-]?\s*/i, '').replace(/^optional[:\s]*/i, '').trim();
+    return rest ? rest.split(/\s*\+\s*/).filter(Boolean).map(n => ({ n:cap(n), o:true })) : [];
+  }
+  return t.split(/\s*\+\s*/).map(x => x.trim()).filter(Boolean).map(n => {
+    const opt = /^optional[:\s]+/i.test(n);
+    return { n:cap(n.replace(/^optional[:\s]+/i, '')), o:opt };
+  });
+}
+
+/* Einheiten eines Tages: gespeicherte Momentaufnahme oder aktueller Plan */
+function dayUnits(k){
+  const d = state.days[k];
+  if (d && d.units) return d.units.map(u => ({ ...u }));
+  return parseUnits(state.plan[planIndex(k)]).map(u => ({ ...u, d:false }));
+}
+
+function trainStats(k){
+  const units = dayUnits(k), req = units.filter(u => !u.o);
+  const done = req.filter(u => u.d).length;
+  const rest = req.length === 0;
+  return { units, req:req.length, done, rest, bonus:units.filter(u => u.o && u.d).length,
+           ratio:rest ? 1 : done / req.length, complete:rest || done === req.length };
+}
+
+/* Einheit abhaken – speichert dabei die Momentaufnahme des Plans für diesen Tag */
+function toggleUnit(k, i){
+  const before = trainStats(k);
+  const day = ensureDay(k);
+  if (!day.units) day.units = dayUnits(k);
+  if (!day.units[i]) return;
+  day.units[i].d = !day.units[i].d;
+  cleanupDay(k);
+  save();
+  const after = trainStats(k);
+  renderAll();
+  if (!before.rest && !before.complete && after.complete){
+    if (k === todayKey() && currentTab === 'today' && !dayCtx) celebrate();
+    toast('Trainingsring geschlossen');
+  }
+}
+
+/* ============================================================
+   E. UI-BAUSTEINE
+   ============================================================ */
+let toastTimer = null;
+function toast(msg, actionLabel, actionFn){
+  const b = $('#toast-btn');
+  $('#toast-msg').textContent = msg;
+  if (actionLabel){ b.textContent = actionLabel; b.classList.remove('hidden'); b.onclick = () => { hideToast(); actionFn(); }; }
+  else { b.classList.add('hidden'); b.onclick = null; }
+  $('#toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, actionLabel ? 4500 : 2200);
+}
+function hideToast(){ $('#toast').classList.remove('show'); }
+
+/* iOS-Dialog, liefert Promise<boolean>. cancel:null → nur ein Button */
+function confirmDialog({ title, message = '', ok = 'OK', cancel = 'Abbrechen', destructive = false }){
+  return new Promise(resolve => {
+    const dlg = $('#dialog'), okB = $('#dlg-ok'), cB = $('#dlg-cancel');
+    $('#dlg-title').textContent = title; $('#dlg-msg').textContent = message;
+    okB.textContent = ok; okB.className = destructive ? 'destructive' : 'strong';
+    cB.classList.toggle('hidden', cancel === null);
+    if (cancel !== null) cB.textContent = cancel;
+    const done = v => { dlg.classList.remove('open'); okB.onclick = cB.onclick = null; resolve(v); };
+    okB.onclick = () => done(true); cB.onclick = () => done(false);
+    dlg.classList.add('open');
+  });
+}
+
+function openSheet(name){ $('#bd-' + name).classList.add('open'); $('#' + name + 'Sheet').classList.add('open'); }
+function closeSheet(name){
+  const sh = $('#' + name + 'Sheet');
+  if (sh.contains(document.activeElement)) document.activeElement.blur();
+  $('#bd-' + name).classList.remove('open'); sh.classList.remove('open');
+}
+/* Am Griff nach unten wischen schließt das Sheet */
+function enableSwipeToClose(name){
+  const sh = $('#' + name + 'Sheet');
+  let y0 = null, dy = 0;
+  sh.addEventListener('touchstart', e => {
+    if (!e.target.closest('.grabber, .sheet-head') || e.target.closest('button')) return;
+    y0 = e.touches[0].clientY; dy = 0; sh.style.transition = 'none';
+  }, { passive:true });
+  sh.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    dy = Math.max(0, e.touches[0].clientY - y0); sh.style.transform = 'translateY(' + dy + 'px)';
+  }, { passive:true });
+  const end = () => {
+    if (y0 === null) return;
+    sh.style.transition = ''; sh.style.transform = '';
+    if (dy > 90){ closeSheet(name); if (name === 'day') dayCtx = null; }
+    y0 = null;
+  };
+  sh.addEventListener('touchend', end); sh.addEventListener('touchcancel', end);
+}
+/* Tastaturhöhe messen, damit Sheets darüber sitzen */
+function trackKeyboard(){
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const upd = () => {
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--kb', (kb > 60 ? kb : 0) + 'px');
+  };
+  vv.addEventListener('resize', upd); vv.addEventListener('scroll', upd); upd();
+}
+
+/* --- Status-Texte & -Farben --- */
+function kcalState(v, goal){
+  const r = goal ? v / goal : 0, diff = goal - v;
+  if (r > KCAL_T.over)   return { c:'var(--bad)',  t:fmtK(-diff) + ' drüber' };
+  if (r > KCAL_T.inHigh) return { c:'var(--warn)', t:fmtK(-diff) + ' drüber' };
+  if (r >= KCAL_T.inLow) return { c:'var(--ok)',   t:'Im Ziel' };
+  if (r >= KCAL_T.almost)return { c:'var(--warn)', t:'noch ' + fmtK(diff) };
+  return { c:'var(--muted)', t:'noch ' + fmtK(diff) };
+}
+function protState(v, goal){
+  const r = goal ? v / goal : 0;
+  if (r >= 1) return { c:'var(--ok)', t:v - goal >= 0.5 ? fmtP(v - goal) + ' g drüber' : 'Ziel erreicht' };
+  return { c:r >= PROT_ALMOST ? 'var(--warn)' : 'var(--muted)', t:'noch ' + fmtP(goal - v) + ' g' };
+}
+
+/* Kleine Dreifach-Ringe (Woche, Verlauf, Tag-Details) */
+function miniRings(k, size){
+  const st = trainStats(k), t = totals(k), g = state.goals;
+  const kr = t.kcal / g.kcal, pr = t.protein / g.protein;
+  const noData = !hasEntries(k) && !(st.done || st.bonus);
+  const arc = (r, ratio, grad) => {
+    const c = C(r), v = Math.min(ratio, 1);
+    return '<circle cx="150" cy="150" r="' + r + '" fill="none" stroke-width="30" stroke="url(#' + grad + ')" stroke-opacity=".2"/>' +
+      (v > 0 ? '<circle cx="150" cy="150" r="' + r + '" fill="none" stroke-width="30" stroke-linecap="round" stroke="url(#' + grad + ')" stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + (c * (1 - v)).toFixed(1) + '"/>' : '');
+  };
+  return '<svg class="mini" width="' + size + '" height="' + size + '" viewBox="-6 -6 312 312" aria-hidden="true"><g transform="rotate(-90 150 150)">' +
+    arc(R.train, noData && st.rest ? 0 : st.ratio, 'g-train') +
+    arc(R.kcal, kr, kr > KCAL_T.over ? 'g-bad' : 'g-kcal') +
+    arc(R.prot, pr, 'g-prot') + '</g></svg>';
+}
+
+function legendHTML(k){
+  const st = trainStats(k), t = totals(k), g = state.goals, ks = kcalState(t.kcal, g.kcal), ps = protState(t.protein, g.protein);
+  const trainVal = st.rest ? 'Ruhe' : st.done + '/' + st.req;
+  const trainState = st.rest ? (st.bonus ? 'Bonus erledigt' : 'Erholung')
+                    : st.complete ? 'Geschlossen' : 'noch ' + (st.req - st.done);
+  return '<div class="legend3">' +
+    '<div class="leg"><div class="leg-bar" style="background:linear-gradient(90deg,var(--train-a),var(--train-b))"></div>' +
+      '<div class="leg-val" style="color:var(--train)">' + trainVal + '</div><div class="leg-goal">' + (st.rest ? 'Ruhetag' : 'Einheiten') + '</div>' +
+      '<div class="leg-state" style="color:' + (st.complete && !st.rest ? 'var(--ok)' : 'var(--muted)') + '">' + trainState + '</div></div>' +
+    '<div class="leg"><div class="leg-bar" style="background:linear-gradient(90deg,var(--kcal-a),var(--kcal-b))"></div>' +
+      '<div class="leg-val" style="color:var(--kcal)">' + fmtK(t.kcal) + '</div><div class="leg-goal">von ' + fmtK(g.kcal) + ' kcal</div>' +
+      '<div class="leg-state" style="color:' + ks.c + '">' + ks.t + '</div></div>' +
+    '<div class="leg"><div class="leg-bar" style="background:linear-gradient(90deg,var(--prot-a),var(--prot-b))"></div>' +
+      '<div class="leg-val" style="color:var(--prot)">' + fmtP(t.protein) + '</div><div class="leg-goal">von ' + fmtP(g.protein) + ' g Eiweiß</div>' +
+      '<div class="leg-state" style="color:' + ps.c + '">' + ps.t + '</div></div>' +
+  '</div>';
+}
+
+const CHECK_SVG = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function unitsHTML(k){
+  const st = trainStats(k);
+  let html = '';
+  if (st.rest){
+    html += '<div class="rest-card"><b>Ruhetag</b>Erholung zählt. Dein Trainingsring ist heute automatisch erfüllt.</div>';
+  }
+  if (st.units.length){
+    html += '<div class="units"' + (st.rest ? ' style="margin-top:8px"' : '') + '>' + st.units.map((u, i) =>
+      '<button class="unit' + (u.d ? ' done' : '') + '" data-action="toggle-unit" data-date="' + k + '" data-i="' + i + '" aria-pressed="' + u.d + '">' +
+        '<span class="check">' + CHECK_SVG + '</span><span class="unit-name">' + esc(u.n) + '</span>' +
+        (u.o ? '<span class="unit-tag">optional</span>' : '') + '</button>').join('') + '</div>';
+  }
+  return html;
+}
+
+function entryRow(e, k){
+  return '<button class="row" data-action="edit-entry" data-date="' + k + '" data-id="' + esc(e.id) + '">' +
+    '<span class="row-time">' + esc(e.time) + '</span>' +
+    '<span class="row-main"><span class="row-title">' + esc(e.name || 'Eintrag') + '</span></span>' +
+    '<span class="row-right"><span class="r-kcal">' + fmtK(e.kcal) + ' kcal</span><span class="r-prot">' + fmtP(e.protein) + ' g</span></span></button>';
+}
+function entriesHTML(k, emptyText){
+  const list = getDay(k).entries;
+  return '<div class="group">' + (list.length ? list.map(e => entryRow(e, k)).join('') : '<div class="empty">' + emptyText + '</div>') + '</div>';
+}
+
+/* ============================================================
+   F. ANSICHT „HEUTE“
+   ============================================================ */
+let ringsReady = false; // erst nach dem ersten Frame füllen → sichtbare Animation
+
+function setHeroRing(id, ratio, stroke, glow){
+  const el = $('#' + id), c = C(+el.getAttribute('r'));
+  el.style.strokeDasharray = c;
+  if (ringsReady) el.style.strokeDashoffset = c * (1 - Math.min(Math.max(ratio, 0), 1));
+  el.style.opacity = ratio > 0 ? 1 : 0;
+  el.setAttribute('stroke', stroke);
+  if (glow) el.setAttribute('filter', 'url(#glow)'); else el.removeAttribute('filter');
+}
+
+function renderHero(k){
+  const st = trainStats(k), t = totals(k), g = state.goals;
+  const kr = t.kcal / g.kcal, pr = t.protein / g.protein;
+  setHeroRing('hr-train', st.ratio, 'url(#g-train)', st.complete && !st.rest);
+  setHeroRing('hr-kcal', kr, kr > KCAL_T.over ? 'url(#g-bad)' : 'url(#g-kcal)', kr >= KCAL_T.inLow && kr <= KCAL_T.inHigh);
+  setHeroRing('hr-prot', pr, 'url(#g-prot)', pr >= 1);
+  if (st.rest){ $('#hero-big').textContent = 'Ruhetag'; $('#hero-big').style.fontSize = '32px'; $('#hero-small').textContent = 'Erholung zählt'; }
+  else {
+    $('#hero-big').style.fontSize = '';
+    $('#hero-big').textContent = st.done + '/' + st.req;
+    $('#hero-small').textContent = st.complete ? 'Ring geschlossen' : 'Einheiten';
+  }
+}
+
+/* Moment, wenn sich der Trainingsring schließt */
+function celebrate(){
+  const hero = $('#hero');
+  hero.classList.remove('pulse'); void hero.offsetWidth; hero.classList.add('pulse');
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const radius = hero.offsetWidth * 0.46, cols = ['#b86bff', '#ff3b8d', '#ff9ad0', '#ffffff'];
+  for (let i = 0; i < 18; i++){
+    const s = document.createElement('span');
+    s.className = 'spark';
+    s.style.setProperty('--a', (i * 20 + Math.random() * 10) + 'deg');
+    s.style.setProperty('--r', radius + 'px');
+    s.style.setProperty('--c', cols[i % cols.length]);
+    s.style.animationDelay = (Math.random() * 120) + 'ms';
+    hero.appendChild(s);
+    setTimeout(() => s.remove(), 1200);
+  }
+}
+
+function backupBanner(){
+  if (Object.keys(state.days).length < 3) return '';
+  let last = null;
+  try { last = localStorage.getItem(LAST_EXPORT_KEY); } catch (_) {}
+  const age = last ? Math.floor((Date.now() - new Date(last).getTime()) / 864e5) : null;
+  if (age !== null && age < 14) return '';
+  return '<button class="banner" data-action="export">' +
+    (age === null ? 'Noch kein Backup. Jetzt sichern' : 'Letztes Backup vor ' + age + ' Tagen. Jetzt sichern') + '</button>';
+}
+
+function renderToday(){
+  const k = todayKey(), d = dateFromKey(k), st = trainStats(k), n = getDay(k).entries.length;
+  $('#t-weekday').textContent = d.toLocaleDateString('de-DE', { weekday:'long' });
+  $('#t-date').textContent = d.toLocaleDateString('de-DE', { day:'numeric', month:'long', year:'numeric' });
+  $('#t-banner').innerHTML = backupBanner();
+  renderHero(k);
+  $('#t-legend').outerHTML = legendHTML(k).replace('<div class="legend3">', '<div class="legend3" id="t-legend">');
+  $('#t-train-count').textContent = st.rest ? 'Ruhetag' : st.done + ' von ' + st.req + ' erledigt';
+  $('#t-units').innerHTML = unitsHTML(k);
+  $('#t-favs').innerHTML = state.favorites.length
+    ? '<div class="chips">' + state.favorites.map(f =>
+        '<button class="chip" data-action="fav-add" data-id="' + esc(f.id) + '"><span class="chip-name">' + esc(f.name) + '</span>' +
+        '<span class="chip-meta"><span class="k">' + fmtK(f.kcal) + ' kcal</span><span class="p">' + fmtP(f.protein) + ' g</span></span></button>').join('') + '</div>'
+    : '';
+  $('#t-entry-count').textContent = n ? n + (n === 1 ? ' Eintrag' : ' Einträge') : '';
+  $('#t-entries').innerHTML = entriesHTML(k, 'Noch nichts eingetragen.<br>Tippe auf „Essen hinzufügen“.');
+}
+
+/* ============================================================
+   G. ANSICHT „WOCHE“
+   ============================================================ */
+function barChart(data, field, goal, colorFn, f){
+  const W = 340, H = 190, top = 22, bottom = 22, left = 4, right = 4, ch = H - top - bottom;
+  const maxV = Math.max(goal * 1.15, ...data.map(d => d[field])) * 1.05 || 1;
+  const slot = (W - left - right) / data.length, bw = Math.min(30, slot * 0.58), today = todayKey();
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+  s += '<line x1="' + left + '" x2="' + (W - right) + '" y1="' + (top + ch) + '" y2="' + (top + ch) + '" stroke="var(--line)"/>';
+  data.forEach((d, i) => {
+    const v = d[field], x = left + slot * i + (slot - bw) / 2, cx = x + bw / 2;
+    if (v > 0){
+      const h = Math.max(3, v / maxV * ch), y = top + ch - h, c = colorFn(v / goal);
+      s += '<rect class="bar" style="animation-delay:' + (i * 45) + 'ms" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) +
+           '" height="' + h.toFixed(1) + '" rx="' + Math.min(7, bw / 2) + '" fill="' + c.fill + '" fill-opacity="' + c.op + '"/>';
+      s += '<text class="v" x="' + cx.toFixed(1) + '" y="' + (y - 5).toFixed(1) + '" text-anchor="middle">' + f(v) + '</text>';
+    }
+    s += '<text class="' + (d.k === today ? 'today' : '') + '" x="' + cx.toFixed(1) + '" y="' + (H - 5) + '" text-anchor="middle">' + WD_SHORT[planIndex(d.k)] + '</text>';
+  });
+  const gy = top + ch - goal / maxV * ch;
+  s += '<line x1="' + left + '" x2="' + (W - right) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '" stroke="#fff" stroke-opacity=".45" stroke-dasharray="4 4"/>';
+  s += '<text class="goal" x="' + (W - right) + '" y="' + (gy - 5).toFixed(1) + '" text-anchor="end">Ziel ' + f(goal) + '</text>';
+  return s + '</svg>';
+}
+const kcalBarColor = r => ({ fill:r > KCAL_T.over ? 'url(#g-bad)' : 'url(#g-kcal)', op:1 });
+const protBarColor = r => ({ fill:'url(#g-prot)', op:r >= 1 ? 1 : .55 });
+
+function renderWeek(){
+  const today = todayKey(), g = state.goals, monday = addDays(today, -planIndex(today));
+
+  /* Wochenring: alle Pflicht-Einheiten Mo–So */
+  let req = 0, done = 0, strip = '', planRows = '';
+  for (let i = 0; i < 7; i++){
+    const k = addDays(monday, i), st = trainStats(k), fut = k > today;
+    req += st.req; done += st.done;
+    strip += '<button class="wday' + (k === today ? ' today' : '') + (fut ? ' future' : '') + '" data-action="open-day" data-date="' + k + '"' + (fut ? ' disabled' : '') + '>' +
+      miniRings(k, 40) + '<span>' + WD_LETTER[i] + '</span></button>';
+    const pill = st.rest ? '<span class="pill">Ruhe</span>'
+      : '<span class="pill' + (st.complete ? ' full' : '') + '">' + st.done + '/' + st.req + '</span>';
+    planRows += '<button class="row" data-action="open-day" data-date="' + k + '"' + (fut ? ' style="opacity:.45"' : '') + '>' +
+      '<span class="row-time" style="font-weight:700;color:' + (k === today ? 'var(--text)' : 'var(--muted)') + '">' + WD_SHORT[i] + '</span>' +
+      '<span class="row-main"><span class="row-title" style="font-size:15px;white-space:normal">' +
+        (st.units.length ? st.units.map(u => (u.d ? '✓ ' : '') + esc(u.n)).join('<span style="color:var(--dim)">  +  </span>') : 'Ruhetag') +
+      '</span></span>' + pill + '</button>';
+  }
+  const wr = req ? done / req : 0, c = C(R.train);
+
+  /* Ernährung: letzte 7 Tage inkl. heute */
+  const data = [];
+  for (let i = 6; i >= 0; i--){ const k = addDays(today, -i), t = totals(k); data.push({ k, kcal:t.kcal, protein:t.protein, has:hasEntries(k) }); }
+  const logged = data.filter(d => d.has);
+  const avgK = logged.length ? logged.reduce((a, d) => a + d.kcal, 0) / logged.length : 0;
+  const avgP = logged.length ? logged.reduce((a, d) => a + d.protein, 0) / logged.length : 0;
+  const protHit = data.filter(d => d.protein >= g.protein).length;
+
+  $('#view-week').innerHTML =
+    '<div class="date-line">' + dateFromKey(monday).toLocaleDateString('de-DE', { day:'numeric', month:'long' }) + ' bis ' +
+      dateFromKey(addDays(monday, 6)).toLocaleDateString('de-DE', { day:'numeric', month:'long' }) + '</div>' +
+    '<h1 class="h-large">Woche</h1>' +
+    '<div class="hero" style="width:min(62vw,240px)"><svg viewBox="0 0 300 300" aria-hidden="true"><g transform="rotate(-90 150 150)">' +
+      '<circle cx="150" cy="150" r="' + R.train + '" fill="none" stroke-width="26" stroke="url(#g-train)" stroke-opacity=".2"/>' +
+      (wr > 0 ? '<circle class="ring-prog" cx="150" cy="150" r="' + R.train + '" stroke="url(#g-train)" stroke-dasharray="' + c.toFixed(1) +
+        '" stroke-dashoffset="' + (c * (1 - Math.min(wr, 1))).toFixed(1) + '"' + (wr >= 1 ? ' filter="url(#glow)"' : '') + '/>' : '') +
+      '</g></svg><div class="hero-center"><div class="hero-big">' + done + '/' + req + '</div><div class="hero-small">Einheiten diese Woche</div></div></div>' +
+    '<div class="week-strip">' + strip + '</div>' +
+
+    '<h2 class="h-sec">Trainingsplan <small>' + Math.round(wr * 100) + ' % erledigt</small></h2>' +
+    '<div class="group">' + planRows + '</div>' +
+
+    '<h2 class="h-sec">Ernährung <small>letzte 7 Tage</small></h2>' +
+    '<div class="stats">' +
+      '<div class="stat"><div class="stat-val" style="color:var(--kcal)">' + fmtK(avgK) + '</div><div class="stat-lbl">Ø kcal pro Tag</div></div>' +
+      '<div class="stat"><div class="stat-val" style="color:var(--prot)">' + fmtP(avgP) + '</div><div class="stat-lbl">Ø g Eiweiß pro Tag</div></div>' +
+      '<div class="stat"><div class="stat-val">' + protHit + '<span style="font-size:16px;color:var(--muted)">/7</span></div><div class="stat-lbl">Tage Eiweißziel</div></div>' +
+    '</div>' +
+    '<div class="group pad chart" style="margin-top:10px"><div class="chart-head"><span class="chart-title">Kalorien</span><span class="chart-sub">kcal</span></div>' +
+      barChart(data, 'kcal', g.kcal, kcalBarColor, fmtK) + '</div>' +
+    '<div class="group pad chart" style="margin-top:10px"><div class="chart-head"><span class="chart-title">Eiweiß</span><span class="chart-sub">g</span></div>' +
+      barChart(data, 'protein', g.protein, protBarColor, fmtP) + '</div>' +
+    '<p class="note">Durchschnitt nur über Tage mit Einträgen (' + logged.length + ' von 7), damit vergessene Tage ihn nicht verfälschen.</p>';
+}
+
+/* ============================================================
+   H. ANSICHT „FORTSCHRITT“
+   ============================================================ */
+let progRange = 30; // Tage; 0 = alle
+
+/* Serie rückwärts ab heute; ist heute noch nicht erfüllt, ab gestern */
+function streak(testFn, skipFn){
+  let k = todayKey(), n = 0;
+  const first = firstDataKey();
+  if (!testFn(k)) k = addDays(k, -1);
+  for (let i = 0; i < 3650 && k >= first; i++){
+    if (testFn(k)) n++;
+    else if (!(skipFn && skipFn(k))) break;
+    k = addDays(k, -1);
+  }
+  return n;
+}
+
+/* 7-Tage-Schnitt (nur Tage mit Wert, mind. 3) */
+function rolling(points){
+  return points.map((p, i) => {
+    const w = points.slice(Math.max(0, i - 6), i + 1).map(x => x.v).filter(v => v != null);
+    return w.length >= 3 ? w.reduce((a, b) => a + b, 0) / w.length : null;
+  });
+}
+
+function lineChart(points, { goal, color, fmt }){
+  const vals = points.map(p => p.v).filter(v => v != null);
+  if (!vals.length) return '<div class="empty">Noch keine Daten in diesem Zeitraum.</div>';
+  const W = 340, H = 170, top = 12, bottom = 20, left = 4, right = 40, cw = W - left - right, ch = H - top - bottom;
+  const lo = 0, hi = Math.max(...vals, goal) * 1.12 || 1, n = points.length;
+  const X = i => left + (n === 1 ? cw / 2 : i * cw / (n - 1));
+  const Y = v => top + ch - (v - lo) / (hi - lo) * ch;
+  let s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+  [hi, lo].forEach(v => {
+    s += '<line x1="' + left + '" x2="' + (left + cw) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" stroke="var(--line)"/>';
+    s += '<text x="' + (W - 2) + '" y="' + (Y(v) + 3).toFixed(1) + '" text-anchor="end">' + fmt(v) + '</text>';
+  });
+  s += '<line x1="' + left + '" x2="' + (left + cw) + '" y1="' + Y(goal).toFixed(1) + '" y2="' + Y(goal).toFixed(1) + '" stroke="#fff" stroke-opacity=".45" stroke-dasharray="4 4"/>';
+  s += '<text class="goal" x="' + (W - 2) + '" y="' + (Y(goal) - 2).toFixed(1) + '" text-anchor="end">Ziel</text>';
+  s += '<text class="goal" x="' + (W - 2) + '" y="' + (Y(goal) + 9).toFixed(1) + '" text-anchor="end">' + fmt(goal) + '</text>';
+  const r = n > 60 ? 1.8 : n > 20 ? 2.4 : 3.2;
+  points.forEach((p, i) => { if (p.v != null) s += '<circle cx="' + X(i).toFixed(1) + '" cy="' + Y(p.v).toFixed(1) + '" r="' + r + '" fill="' + color + '" fill-opacity=".4"/>'; });
+  let d = '', pen = false;
+  rolling(points).forEach((v, i) => { if (v == null){ pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' '; pen = true; });
+  if (d) s += '<path class="line" d="' + d + '" stroke="' + color + '"/>';
+  [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i).forEach((i, j, a) => {
+    s += '<text x="' + X(i).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="' + (j === 0 ? 'start' : j === a.length - 1 ? 'end' : 'middle') + '">' + fmtDM(points[i].k) + '</text>';
+  });
+  return s + '</svg>';
+}
+
+function quotaRow(label, sub, pct, fill){
+  const p = pct == null ? null : Math.max(0, Math.min(100, Math.round(pct)));
+  return '<div class="quota"><div class="quota-lbl">' + label + '<small>' + sub + '</small></div>' +
+    '<div class="quota-bar"><i style="width:' + (p || 0) + '%;background:' + fill + '"></i></div>' +
+    '<div class="quota-val">' + (p == null ? '–' : p + ' %') + '</div></div>';
+}
+
+/* Heatmap-Score pro Tag: Eiweißziel · Kalorien 80–110 % · Trainingsring geschlossen */
+function dayScore(k){
+  const st = trainStats(k), has = hasEntries(k);
+  if (!has && !st.done && !st.bonus) return null;
+  const t = totals(k), g = state.goals, r = t.kcal / g.kcal;
+  return (has && t.protein >= g.protein ? 1 : 0) + (has && r >= KCAL_T.almost && r <= KCAL_T.over ? 1 : 0) + (st.complete ? 1 : 0);
+}
+const HEAT = ['rgba(226,75,208,.18)', 'rgba(226,75,208,.42)', 'rgba(226,75,208,.7)', 'url(#)'];
+function heatmap(){
+  const today = todayKey(), start = addDays(addDays(today, -planIndex(today)), -77);
+  let cells = '';
+  for (let i = 0; i < 84; i++){
+    const k = addDays(start, i);
+    if (k > today){ cells += '<button class="fut" disabled aria-hidden="true"></button>'; continue; }
+    const sc = dayScore(k);
+    const bg = sc == null ? '' : sc === 3 ? 'background:linear-gradient(135deg,var(--train-a),var(--train-b))' : 'background:' + HEAT[sc];
+    cells += '<button data-action="open-day" data-date="' + k + '" aria-label="' + fmtDateShort(k) + '" style="' + bg +
+      (k === today ? ';outline:1.5px solid #fff;outline-offset:1px' : '') + '"></button>';
+  }
+  return '<div class="heat-wrap"><div class="heat-days">' + WD_SHORT.map((d, i) => '<span>' + (i % 2 === 0 ? d : '') + '</span>').join('') +
+    '</div><div class="heat">' + cells + '</div></div>' +
+    '<div class="heat-legend">weniger <i style="background:var(--surface-2)"></i>' +
+    HEAT.slice(0, 3).map(c => '<i style="background:' + c + '"></i>').join('') +
+    '<i style="background:linear-gradient(135deg,var(--train-a),var(--train-b))"></i> mehr</div>';
+}
+
+function renderProgress(){
+  const today = todayKey(), g = state.goals;
+  const n = progRange || Math.max(7, dayDiff(firstDataKey(), today) + 1);
+  const keys = [];
+  for (let i = n - 1; i >= 0; i--) keys.push(addDays(today, -i));
+  /* Quoten nur über abgeschlossene Tage ab dem ersten Tag mit Daten */
+  const first = firstDataKey();
+  const statKeys = keys.filter(k => k < today && k >= first);
+  const logged = statKeys.filter(hasEntries);
+
+  const sTrain = streak(k => { const s = trainStats(k); return s.complete && !s.rest; }, k => trainStats(k).rest);
+  const sProt = streak(k => hasEntries(k) && totals(k).protein >= g.protein);
+  const sTrack = streak(hasEntries);
+
+  let uReq = 0, uDone = 0, closed = 0, trainDays = 0;
+  statKeys.forEach(k => { const s = trainStats(k); uReq += s.req; uDone += s.done; if (!s.rest){ trainDays++; if (s.complete) closed++; } });
+  const protHit = logged.filter(k => totals(k).protein >= g.protein).length;
+  const kcalOk = logged.filter(k => { const r = totals(k).kcal / g.kcal; return r >= KCAL_T.inLow && r <= KCAL_T.inHigh; }).length;
+  const avg = (arr, f) => arr.length ? arr.reduce((a, k) => a + f(k), 0) / arr.length : null;
+  const avgK = avg(logged, k => totals(k).kcal), avgP = avg(logged, k => totals(k).protein);
+  const pct = (a, b) => b ? a / b * 100 : null;
+  const rangeBtn = (v, l) => '<button class="' + (progRange === v ? 'on' : '') + '" data-action="range" data-range="' + v + '">' + l + '</button>';
+
+  $('#view-progress').innerHTML =
+    '<div class="date-line">Seit ' + dateFromKey(first).toLocaleDateString('de-DE', { day:'numeric', month:'long', year:'numeric' }) + '</div>' +
+    '<h1 class="h-large">Fortschritt</h1>' +
+
+    '<div class="stats" style="margin-top:18px">' +
+      '<div class="stat"><div class="stat-val" style="color:var(--train)">' + sTrain + '</div><div class="stat-lbl">Trainingsringe in Folge</div></div>' +
+      '<div class="stat"><div class="stat-val" style="color:var(--prot)">' + sProt + '</div><div class="stat-lbl">Tage Eiweißziel in Folge</div></div>' +
+      '<div class="stat"><div class="stat-val">' + sTrack + '</div><div class="stat-lbl">Tage getrackt in Folge</div></div>' +
+    '</div>' +
+
+    '<div class="seg">' + rangeBtn(7, '7 Tage') + rangeBtn(30, '30 Tage') + rangeBtn(90, '90 Tage') + rangeBtn(0, 'Alle') + '</div>' +
+
+    '<h2 class="h-sec">Quoten <small>ohne heute</small></h2>' +
+    '<div class="group" style="padding:4px 16px">' +
+      quotaRow('Trainingsringe geschlossen', closed + ' von ' + trainDays + ' Trainingstagen', pct(closed, trainDays), 'linear-gradient(90deg,var(--train-a),var(--train-b))') +
+      quotaRow('Einheiten erledigt', uDone + ' von ' + uReq, pct(uDone, uReq), 'var(--train)') +
+      quotaRow('Eiweißziel erreicht', protHit + ' von ' + logged.length + ' Tagen', pct(protHit, logged.length), 'linear-gradient(90deg,var(--prot-a),var(--prot-b))') +
+      quotaRow('Kalorien im Ziel (±5 %)', kcalOk + ' von ' + logged.length + ' Tagen', pct(kcalOk, logged.length), 'linear-gradient(90deg,var(--kcal-a),var(--kcal-b))') +
+      quotaRow('Getrackt', logged.length + ' von ' + statKeys.length + ' Tagen', pct(logged.length, statKeys.length), 'var(--muted)') +
+    '</div>' +
+
+    '<h2 class="h-sec">Kalorien <small>Linie: 7-Tage-Schnitt</small></h2>' +
+    '<div class="group pad chart"><div class="chart-head"><span class="chart-title" style="color:var(--kcal)">Ø ' + (avgK != null ? fmtK(avgK) : '–') + ' kcal</span></div>' +
+      lineChart(keys.map(k => ({ k, v:hasEntries(k) ? totals(k).kcal : null })), { goal:g.kcal, color:'var(--kcal)', fmt:fmtK }) + '</div>' +
+
+    '<h2 class="h-sec">Eiweiß <small>Linie: 7-Tage-Schnitt</small></h2>' +
+    '<div class="group pad chart"><div class="chart-head"><span class="chart-title" style="color:var(--prot)">Ø ' + (avgP != null ? fmtP(avgP) : '–') + ' g</span></div>' +
+      lineChart(keys.map(k => ({ k, v:hasEntries(k) ? totals(k).protein : null })), { goal:g.protein, color:'var(--prot)', fmt:fmtK }) + '</div>' +
+
+    '<h2 class="h-sec">Letzte 12 Wochen</h2>' +
+    '<div class="group pad">' + heatmap() +
+      '<p class="note" style="margin:10px 0 0">Ein Tag leuchtet voll, wenn Eiweißziel, Kalorien (80–110 %) und Trainingsring stimmen. Antippen öffnet den Tag.</p></div>';
+}
+
+/* ============================================================
+   I. VERLAUF + TAG-DETAILS
+   ============================================================ */
+function renderHistory(){
+  const today = todayKey();
+  const keys = Object.keys(state.days).filter(k => k < today).sort().reverse();
+  const rows = keys.map(k => {
+    const t = totals(k), st = trainStats(k);
+    return '<button class="row" data-action="open-day" data-date="' + k + '">' + miniRings(k, 42) +
+      '<span class="row-main"><span class="row-title">' + fmtDateShort(k) + '</span>' +
+      '<span class="row-sub"><span style="color:var(--kcal)">' + fmtK(t.kcal) + ' kcal</span>   <span style="color:var(--prot)">' + fmtP(t.protein) + ' g</span></span></span>' +
+      (st.rest ? '<span class="pill">Ruhe</span>' : '<span class="pill' + (st.complete ? ' full' : '') + '">' + st.done + '/' + st.req + '</span>') +
+      '<span class="chev">›</span></button>';
+  }).join('');
+  $('#view-history').innerHTML =
+    '<div class="date-line">Alle vergangenen Tage</div><h1 class="h-large">Verlauf</h1>' +
+    '<div class="group pad" style="margin-top:18px"><div class="field" style="margin-top:0"><label for="h-date">Vergessenen Tag nachtragen</label>' +
+      '<input class="input" type="date" id="h-date" max="' + today + '" value="' + addDays(today, -1) + '"></div>' +
+      '<button class="btn accent" data-action="open-picked-day">Tag öffnen</button></div>' +
+    '<h2 class="h-sec">Tage <small>' + keys.length + '</small></h2>' +
+    '<div class="group">' + (rows || '<div class="empty">Noch keine vergangenen Tage.<br>Ab morgen erscheinen sie hier.</div>') + '</div>';
+}
+
+let dayCtx = null;
+function openDaySheet(k){
+  if (k === todayKey()){ switchTab('today'); return; }
+  if (k > todayKey()) return;
+  dayCtx = k; renderDaySheet(); $('#daySheet').scrollTop = 0; openSheet('day');
+}
+function renderDaySheet(){
+  if (!dayCtx) return;
+  const k = dayCtx;
+  $('#ds-title').textContent = fmtDateShort(k);
+  $('#ds-body').innerHTML =
+    '<div class="day-top">' + miniRings(k, 116) + legendHTML(k) + '</div>' +
+    '<h2 class="h-sec">Training <small>' + WD[planIndex(k)] + '</small></h2>' + unitsHTML(k) +
+    '<button class="btn-add" data-action="add-entry-day"><span>+</span> Eintrag nachtragen</button>' +
+    '<h2 class="h-sec">Gegessen</h2>' + entriesHTML(k, 'Keine Einträge an diesem Tag.');
+}
+
+/* ============================================================
+   J. EINTRÄGE
+   ============================================================ */
+let entryCtx = null; // { dateKey, id | null }
+
+function setFieldError(field, msg){
+  const input = $('#f-' + field), box = $('#e-' + field);
+  box.textContent = msg || '';
+  input.classList.toggle('err', !!msg);
+  if (msg){ input.classList.remove('shake'); void input.offsetWidth; input.classList.add('shake'); }
+}
+
+function openEntrySheet(dateKey, id){
+  const editing = !!id, entry = editing ? getDay(dateKey).entries.find(e => e.id === id) : null;
+  if (editing && !entry) return;
+  entryCtx = { dateKey, id:editing ? id : null };
+  const isToday = dateKey === todayKey();
+  $('#es-title').textContent = editing ? 'Eintrag bearbeiten' : (isToday ? 'Essen hinzufügen' : 'Eintrag nachtragen');
+  $('#f-kcal').value = entry ? numToInput(entry.kcal) : '';
+  $('#f-prot').value = entry ? numToInput(entry.protein) : '';
+  $('#f-name').value = entry ? entry.name : '';
+  $('#f-time').value = entry ? entry.time : (isToday ? nowTime() : '12:00');
+  $('#time-field').classList.toggle('hidden', !editing && isToday); // heute: Uhrzeit automatisch
+  $('#f-fav').checked = false;
+  $('#es-delete').classList.toggle('hidden', !editing);
+  setFieldError('kcal', ''); setFieldError('prot', '');
+  $('#entrySheet').scrollTop = 0;
+  openSheet('entry');
+  /* Fokus synchron im Tipp-Ereignis, sonst öffnet iOS keine Tastatur */
+  if (!editing) $('#f-kcal').focus({ preventScroll:true });
+}
+
+function saveEntry(){
+  if (!entryCtx) return;
+  const k = parseNum($('#f-kcal').value, MAX_KCAL), p = parseNum($('#f-prot').value, MAX_PROT);
+  setFieldError('kcal', k.error ? (k.error === 'Bitte eine Zahl eingeben' ? 'Bitte Kalorien eingeben' : k.error) : '');
+  setFieldError('prot', p.error ? (p.error === 'Bitte eine Zahl eingeben' ? 'Bitte Eiweiß eingeben, auch 0' : p.error) : '');
+  if (k.error || p.error) return;
+  const name = $('#f-name').value.trim().slice(0, 60);
+  const showTime = !$('#time-field').classList.contains('hidden');
+  const time = showTime && /^\d{2}:\d{2}/.test($('#f-time').value) ? $('#f-time').value.slice(0, 5) : nowTime();
+  const day = ensureDay(entryCtx.dateKey);
+  if (entryCtx.id){
+    const e = day.entries.find(x => x.id === entryCtx.id);
+    if (e) Object.assign(e, { kcal:k.value, protein:p.value, name, time });
+  } else day.entries.push({ id:uid(), time, name, kcal:k.value, protein:p.value });
+  day.entries.sort((a, b) => a.time.localeCompare(b.time));
+  let favMsg = '';
+  if ($('#f-fav').checked){
+    const favName = name || (fmtK(k.value) + ' kcal');
+    if (!state.favorites.some(f => f.name === favName && f.kcal === k.value && f.protein === p.value)){
+      state.favorites.push({ id:uid(), name:favName, kcal:k.value, protein:p.value }); favMsg = ', als Favorit gespeichert';
+    }
+  }
+  save(); closeSheet('entry'); renderAll(); renderSettings();
+  toast((entryCtx.id ? 'Geändert' : 'Hinzugefügt') + favMsg);
+}
+
+async function deleteEntry(){
+  if (!entryCtx || !entryCtx.id) return;
+  if (!await confirmDialog({ title:'Eintrag löschen?', message:'Das kann nicht rückgängig gemacht werden.', ok:'Löschen', destructive:true })) return;
+  const day = state.days[entryCtx.dateKey];
+  if (day){ day.entries = day.entries.filter(e => e.id !== entryCtx.id); cleanupDay(entryCtx.dateKey); }
+  save(); closeSheet('entry'); renderAll(); toast('Gelöscht');
+}
+
+/* Favorit mit einem Tipp – mit „Rückgängig“ gegen Fehltipps */
+function quickAddFavorite(id){
+  const f = state.favorites.find(x => x.id === id);
+  if (!f) return;
+  const k = todayKey(), entry = { id:uid(), time:nowTime(), name:f.name, kcal:f.kcal, protein:f.protein };
+  const day = ensureDay(k);
+  day.entries.push(entry); day.entries.sort((a, b) => a.time.localeCompare(b.time));
+  save(); renderAll();
+  toast(f.name + ' hinzugefügt', 'Rückgängig', () => {
+    const d = state.days[k];
+    if (d){ d.entries = d.entries.filter(e => e.id !== entry.id); cleanupDay(k); }
+    save(); renderAll();
+  });
+}
+
+/* ============================================================
+   K. EINSTELLUNGEN + BACKUP
+   ============================================================ */
+function renderSettings(){
+  const g = state.goals;
+  let last = null;
+  try { last = localStorage.getItem(LAST_EXPORT_KEY); } catch (_) {}
+  const lastTxt = last ? 'Letztes Backup am ' + new Date(last).toLocaleDateString('de-DE', { day:'numeric', month:'long', year:'numeric' }) + '.' : 'Noch kein Backup erstellt.';
+  const favRows = state.favorites.length ? state.favorites.map(f =>
+      '<div class="row"><span class="row-main"><span class="row-title">' + esc(f.name) + '</span>' +
+      '<span class="row-sub"><span style="color:var(--kcal)">' + fmtK(f.kcal) + ' kcal</span>   <span style="color:var(--prot)">' + fmtP(f.protein) + ' g</span></span></span>' +
+      '<button class="icon-btn" data-action="fav-del" data-id="' + esc(f.id) + '">Löschen</button></div>').join('')
+    : '<div class="empty">Keine Favoriten.</div>';
+
+  $('#view-settings').innerHTML =
+    '<h1 class="h-large" style="margin-top:22px">Einstellungen</h1>' +
+
+    '<h2 class="h-sec">Tagesziele</h2><div class="group pad"><div class="grid2">' +
+      '<div class="field"><label for="s-kcal">Kalorien</label><input class="input" id="s-kcal" type="text" inputmode="decimal" value="' + numToInput(g.kcal) + '"></div>' +
+      '<div class="field"><label for="s-prot">Eiweiß in g</label><input class="input" id="s-prot" type="text" inputmode="decimal" value="' + numToInput(g.protein) + '"></div>' +
+      '</div><div class="err-msg" id="s-goal-err"></div><button class="btn accent" data-action="save-goals">Ziele speichern</button></div>' +
+
+    '<h2 class="h-sec">Trainingsplan</h2><div class="group pad">' +
+      WD.map((n, i) => '<div class="field"' + (i === 0 ? ' style="margin-top:0"' : '') + '><label for="s-plan-' + i + '">' + n + '</label>' +
+        '<input class="input" id="s-plan-' + i + '" type="text" maxlength="160" value="' + esc(state.plan[i]) + '"></div>').join('') +
+      '<button class="btn accent" data-action="save-plan">Plan speichern</button>' +
+      '<p class="note">Einheiten mit + trennen, jede wird einzeln abgehakt. „optional“ vor einer Einheit nimmt sie aus dem Ring. Beginnt ein Tag mit „Ruhetag“, ist alles danach optional. Vergangene Tage behalten ihre Einheiten.</p></div>' +
+
+    '<h2 class="h-sec">Favoriten</h2><div class="group">' + favRows + '</div>' +
+    '<div class="group pad" style="margin-top:10px">' +
+      '<div class="field" style="margin-top:0"><label for="n-name">Neuer Favorit</label><input class="input" id="n-name" type="text" maxlength="60" placeholder="Name, z. B. Proteinshake"></div>' +
+      '<div class="grid2" style="margin-top:10px"><div class="field"><input class="input" id="n-kcal" type="text" inputmode="decimal" placeholder="kcal"></div>' +
+      '<div class="field"><input class="input" id="n-prot" type="text" inputmode="decimal" placeholder="Eiweiß in g"></div></div>' +
+      '<div class="err-msg" id="n-err"></div><button class="btn accent" data-action="fav-new">Favorit hinzufügen</button></div>' +
+
+    '<h2 class="h-sec">Backup</h2><div class="group pad">' +
+      '<p class="note" style="margin-top:0">' + lastTxt + ' Deine Daten liegen nur auf diesem iPhone. Sichere sie regelmäßig in der Dateien-App oder iCloud Drive.</p>' +
+      '<button class="btn accent" data-action="export">Daten exportieren</button><button class="btn accent" data-action="import">Daten importieren</button></div>' +
+
+    '<h2 class="h-sec">Alles zurücksetzen</h2>' +
+    '<button class="btn danger" data-action="wipe" style="margin-top:0">Alle Daten löschen</button>' +
+    '<p class="note" style="text-align:center;margin-top:24px">Tracker 2.0</p>';
+}
+
+function blurActive(){ if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
+
+function saveGoals(){
+  const k = parseNum($('#s-kcal').value, MAX_KCAL), p = parseNum($('#s-prot').value, MAX_PROT), err = $('#s-goal-err');
+  if (k.error){ err.textContent = 'Kalorien: ' + k.error; return; }
+  if (p.error){ err.textContent = 'Eiweiß: ' + p.error; return; }
+  if (k.value < 500){ err.textContent = 'Ein Kalorienziel unter 500 kcal ist nicht sinnvoll.'; return; }
+  if (p.value < 1){ err.textContent = 'Das Eiweißziel muss größer als 0 sein.'; return; }
+  err.textContent = '';
+  state.goals = { kcal:k.value, protein:p.value };
+  save(); renderAll(); blurActive(); toast('Ziele gespeichert');
+}
+
+function savePlan(){
+  state.plan = WD.map((_, i) => ($('#s-plan-' + i).value.trim() || 'Ruhetag').slice(0, 160));
+  /* Heute (und Zukunft) folgen dem neuen Plan; bereits abgehakte Einheiten mit gleichem Namen bleiben abgehakt */
+  const t = todayKey(), d = state.days[t];
+  if (d && d.units){
+    const doneNames = new Set(d.units.filter(u => u.d).map(u => u.n.toLowerCase()));
+    d.units = parseUnits(state.plan[planIndex(t)]).map(u => ({ ...u, d:doneNames.has(u.n.toLowerCase()) }));
+    if (!d.units.length) delete d.units;
+    cleanupDay(t);
+  }
+  save(); renderAll(); blurActive(); toast('Trainingsplan gespeichert');
+}
+
+function addFavoriteFromSettings(){
+  const name = $('#n-name').value.trim().slice(0, 60), k = parseNum($('#n-kcal').value, MAX_KCAL), p = parseNum($('#n-prot').value, MAX_PROT), err = $('#n-err');
+  if (!name){ err.textContent = 'Bitte einen Namen eingeben.'; return; }
+  if (k.error){ err.textContent = 'Kalorien: ' + k.error; return; }
+  if (p.error){ err.textContent = 'Eiweiß: ' + p.error; return; }
+  state.favorites.push({ id:uid(), name, kcal:k.value, protein:p.value });
+  save(); renderSettings(); renderToday(); toast('Favorit hinzugefügt');
+}
+
+async function deleteFavorite(id){
+  const f = state.favorites.find(x => x.id === id);
+  if (!f) return;
+  if (!await confirmDialog({ title:'„' + f.name + '“ löschen?', message:'Nur der Favorit wird gelöscht, deine Einträge bleiben.', ok:'Löschen', destructive:true })) return;
+  state.favorites = state.favorites.filter(x => x.id !== id);
+  save(); renderSettings(); renderToday();
+}
+
+function markExported(){
+  try { localStorage.setItem(LAST_EXPORT_KEY, new Date().toISOString()); } catch (_) {}
+  renderSettings(); renderToday();
+}
+
+/* Export über das iOS-Teilen-Menü (Dateien / iCloud Drive), sonst Download */
+async function exportData(){
+  const json = JSON.stringify(Object.assign({ app:'tracker', exportedAt:new Date().toISOString() }, state), null, 2);
+  const name = 'tracker-backup-' + todayKey() + '.json';
+  let file = null;
+  try { file = new File([json], name, { type:'application/json' }); } catch (_) {}
+  if (file && navigator.canShare && navigator.canShare({ files:[file] })){
+    try { await navigator.share({ files:[file] }); markExported(); toast('Backup erstellt'); return; }
+    catch (err) { if (err && err.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(file || new Blob([json], { type:'application/json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  markExported(); toast('Backup heruntergeladen');
+}
+
+async function handleImportFile(e){
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  let data;
+  try {
+    const parsed = JSON.parse(await file.text());
+    if (!parsed || typeof parsed !== 'object' || (!parsed.days && !parsed.goals)) throw new Error('invalid');
+    data = normalize(parsed);
+  } catch (_) {
+    await confirmDialog({ title:'Import fehlgeschlagen', message:'Die Datei ist kein gültiges Tracker-Backup.', cancel:null });
+    return;
+  }
+  const n = Object.keys(data.days).length;
+  if (!await confirmDialog({ title:'Daten überschreiben?', message:'Das Backup enthält ' + n + (n === 1 ? ' Tag' : ' Tage') + '. Alle aktuellen Daten auf diesem iPhone werden ersetzt.', ok:'Importieren', destructive:true })) return;
+  state = data; save(); renderAll(); renderSettings(); toast('Import erfolgreich');
+}
+
+async function wipeAll(){
+  if (!await confirmDialog({ title:'Alle Daten löschen?', message:'Einträge, Verlauf, Favoriten, Ziele und Trainingsplan werden gelöscht.', ok:'Weiter', destructive:true })) return;
+  if (!await confirmDialog({ title:'Wirklich sicher?', message:'Ohne Backup ist alles unwiderruflich weg.', ok:'Endgültig löschen', destructive:true })) return;
+  state = defaultState(); state.favorites = [];
+  save(); renderAll(); renderSettings(); toast('Alle Daten gelöscht');
+}
+
+/* ============================================================
+   L. NAVIGATION & EREIGNISSE
+   ============================================================ */
+let currentTab = 'today';
+function switchTab(name){
+  if (dayCtx){ closeSheet('day'); dayCtx = null; }
+  if (name === currentTab){ $('#view-' + name).scrollTo({ top:0, behavior:'smooth' }); return; }
+  currentTab = name;
+  $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + name));
+  $$('.tab').forEach(t => { const on = t.dataset.tab === name; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
+  if (name === 'week') renderWeek();
+  if (name === 'progress') renderProgress();
+  if (name === 'history') renderHistory();
+  if (name === 'settings') renderSettings();
+}
+
+function renderAll(){
+  renderToday(); renderWeek(); renderProgress(); renderHistory();
+  if (dayCtx) renderDaySheet();
+}
+
+const actions = {
+  'tab':             el => switchTab(el.dataset.tab),
+  'toggle-unit':     el => toggleUnit(el.dataset.date, +el.dataset.i),
+  'add-entry':       () => openEntrySheet(todayKey(), null),
+  'add-entry-day':   () => dayCtx && openEntrySheet(dayCtx, null),
+  'edit-entry':      el => openEntrySheet(el.dataset.date, el.dataset.id),
+  'save-entry':      () => saveEntry(),
+  'delete-entry':    () => deleteEntry(),
+  'close-entry':     () => closeSheet('entry'),
+  'fav-add':         el => quickAddFavorite(el.dataset.id),
+  'open-day':        el => openDaySheet(el.dataset.date),
+  'open-picked-day': () => {
+    const v = $('#h-date').value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)){ toast('Bitte ein Datum wählen'); return; }
+    if (v > todayKey()){ toast('Zukünftige Tage lassen sich nicht öffnen'); return; }
+    openDaySheet(v);
+  },
+  'close-day':       () => { closeSheet('day'); dayCtx = null; },
+  'range':           el => { progRange = +el.dataset.range; renderProgress(); },
+  'save-goals':      () => saveGoals(),
+  'save-plan':       () => savePlan(),
+  'fav-new':         () => addFavoriteFromSettings(),
+  'fav-del':         el => deleteFavorite(el.dataset.id),
+  'export':          () => exportData(),
+  'import':          () => $('#importFile').click(),
+  'wipe':            () => wipeAll()
+};
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el || el.disabled) return;
+  const fn = actions[el.dataset.action];
+  if (fn){ e.preventDefault(); fn(el, e); }
+});
+$('#entryForm').addEventListener('submit', e => { e.preventDefault(); saveEntry(); });
+$('#f-kcal').addEventListener('input', () => setFieldError('kcal', ''));
+$('#f-prot').addEventListener('input', () => setFieldError('prot', ''));
+$('#f-kcal').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('#f-prot').focus(); } });
+$('#f-prot').addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); $('#f-name').focus(); } });
+$('#importFile').addEventListener('change', handleImportFile);
+/* Kein Pinch-Zoom (iOS ignoriert user-scalable=no teilweise) */
+document.addEventListener('gesturestart', e => e.preventDefault(), { passive:false });
+document.addEventListener('gesturechange', e => e.preventDefault(), { passive:false });
+
+/* ============================================================
+   M. TAGESWECHSEL UM MITTERNACHT
+   ============================================================ */
+let lastKey = todayKey();
+function checkDayChange(){
+  const k = todayKey();
+  if (k !== lastKey){ lastKey = k; renderAll(); if (currentTab === 'settings') renderSettings(); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkDayChange(); });
+window.addEventListener('focus', checkDayChange);
+window.addEventListener('pageshow', checkDayChange);
+setInterval(checkDayChange, 30000);
+
+/* ============================================================
+   N. APP-ICON PER CANVAS (iOS kann keine SVG-Icons)
+   ============================================================ */
+function setAppIcon(){
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 180;
+    const g = c.getContext('2d');
+    g.fillStyle = '#000'; g.fillRect(0, 0, 180, 180);
+    const ring = (r, a, b, frac) => {
+      const grad = g.createLinearGradient(90 - r, 90 - r, 90 + r, 90 + r);
+      grad.addColorStop(0, a); grad.addColorStop(1, b);
+      g.lineWidth = 17; g.lineCap = 'round'; g.strokeStyle = grad;
+      g.globalAlpha = .22; g.beginPath(); g.arc(90, 90, r, 0, Math.PI * 2); g.stroke();
+      g.globalAlpha = 1; g.beginPath(); g.arc(90, 90, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac); g.stroke();
+    };
+    ring(66, '#b86bff', '#ff3b8d', .999);
+    ring(46, '#ffb340', '#ff5e3a', .72);
+    ring(26, '#5ee6ff', '#2f7bff', .58);
+    const url = c.toDataURL('image/png');
+    for (const rel of ['apple-touch-icon', 'icon']){
+      const l = document.createElement('link');
+      l.rel = rel; l.href = url;
+      if (rel === 'icon') l.type = 'image/png'; else l.sizes = '180x180';
+      document.head.appendChild(l);
+    }
+  } catch (_) { /* Icon ist nicht kritisch */ }
+}
+
+/* ============================================================
+   O. START
+   ============================================================ */
+let state = load();
+save();               // migrierte Daten (Version 1 → 2) direkt sichern
+setAppIcon();
+['hr-train', 'hr-kcal', 'hr-prot'].forEach(id => { const el = $('#' + id), c = C(+el.getAttribute('r')); el.style.strokeDasharray = c; el.style.strokeDashoffset = c; });
+enableSwipeToClose('entry');
+enableSwipeToClose('day');
+trackKeyboard();
+renderAll();
+renderSettings();
+requestAnimationFrame(() => requestAnimationFrame(() => { ringsReady = true; renderToday(); }));
+</script>
+</body>
+</html>
